@@ -18,52 +18,89 @@
 #
 from openerp.osv import orm, fields
 
-class ProjetctTask(orm.Model):
-    _inherit = 'project.task'
+TASK_WATCHERS = [
+    'work_ids',
+    'remaining_hours',
+    'effective_hours',
+    'planned_hours'
+]
+TIMESHEET_WATCHERS = [
+    'unit_amount',
+    'product_uom_id',
+    'account_id',
+    'task_id',
+    'invoiced_hours'
+]
 
-    # TOTEST
-    def _get_invoiced_hours(self, cr, uid, ids, context=None):
-        import pdb; pdb.set_trace()
+class ProjectTask(orm.Model):
+    _inherit = 'project.task'
+    _name = 'project.task'
+
+    #TOTEST
+    def _progress_rate(self, cr, uid, ids, names, arg, context=None):
+        """ OVERWRITE _progress_rate to make calculation with invoiced_hours
+        and not unit_amount"""
+        """TODO improve code taken for OpenERP"""  #Comment already there
+        res = {}
+        cr.execute("""SELECT task_id, COALESCE(SUM(invoiced_hours),0)
+                        FROM account_analytic_line
+                      WHERE task_id IN %s
+                      GROUP BY task_id""", (tuple(ids),))
+        hours = dict(cr.fetchall())
+        for task in self.browse(cr, uid, ids, context=context):
+            res[task.id] = {}
+            res[task.id]['effective_hours'] = hours.get(task.id, 0.0)
+            res[task.id]['total_hours'] = (
+                task.remaining_hours or 0.0) + hours.get(task.id, 0.0)
+            res[task.id]['delay_hours'] = res[task.id][
+                'total_hours'] - task.planned_hours
+            res[task.id]['progress'] = 0.0
+            if (task.remaining_hours + hours.get(task.id, 0.0)):
+                res[task.id]['progress'] = round(
+                    min(100.0 * hours.get(task.id, 0.0) /
+                        res[task.id]['total_hours'], 99.99), 2)
+            if task.state in ('done', 'cancelled'):
+                res[task.id]['progress'] = 100.0
+        return res
+
+    #TODO Vérifier avec méthodes de hr_timesheet =>'project_task'
+    def _get_hours(self, cr, uid, ids, vals, names, context=None):
+        import pdb
+        pdb.set_trace()
         """ Sum timesheet line invoiced hours """
         res = {}
         for task in self.browse(cr, uid, ids, context=context):
-            res[task.id] = sum(l.invoiced_hours for l in task.work_ids)
+            invoiced_hours = sum(l.invoiced_hours for l in task.work_ids)
+            res[task.id] = {'invoiced_hours': invoiced_hours,
+                            'remaining_hours': task.planned_hours - invoiced_hours}
         return res
 
-    ## TODO Check fieldnames parameter
+    # OK
     def _get_analytic_line(self, cr, uid, ids, arg, context=None):
-        import pdb; pdb.set_trace()
-        result = []
+        import pdb
+        pdb.set_trace()
+        res = []
         for aal in self.pool['account.analytic.line'].browse(cr, uid, ids, context=context):
             if aal.task_id:
-                result.append(aal.taks_id.id)
-        return result
-
-    #TOTEST
-    def _get_remaining_hours(self, cr ,uid , ids, context=None):
-        import pdb; pdb.set_trace()
-        res = {}
-        for task in self.browse(cr, uid, ids, context=context):
-            remaining_hours = task.planned_hours - task.invoiced_hours
-            res[task.id] = remaining_hours
+                res.append(aal.task_id.id)
         return res
 
-    _columns ={
-        'invoiced_hours': fields.function(
-            _get_invoiced_hours,
-            type='float',
-            store={'project.task': (lambda self, cr, uid, ids, c=None: ids,
-                                    ['work_ids'], 20),
+    _store_hours = {'project.task': (lambda self, cr, uid, ids, c={}: ids,
+                                     ['work_ids', 'planned_hours'], 20),
                     'account.analytic.line': (_get_analytic_line,
-                                                ['task_id', 'invoiced_hours'],20)
-                }
-            ),
-        'remaining_hours': fields.function(
-            _get_remaining_hours,
+                                              ['task_id', 'invoiced_hours'], 20)
+                    }
+    _columns = {
+        'invoiced_hours': fields.function(
+            _get_hours,
             type='float',
-            store={'project.task': (lambda self, cr, uid, ids, c=None: ids,
-                                    ['planned_hours', 'invoiced_hours'],20),
-                }
-            ),
+            store=_store_hours,
+            multi="hours"
+        ),
+        'remaining_hours': fields.function(
+            _get_hours,
+            type='float',
+            store=_store_hours,
+            multi="hours"
+        ),
     }
-    
