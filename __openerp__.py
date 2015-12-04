@@ -35,7 +35,6 @@
     'views/account_analytic_line.xml',
     'views/hr_analytic_timesheet.xml',
     'views/project.xml',
-    'views/project_manager_invoicing_menu.xml',
     'wizard/analytic_line_validator_view.xml',
  ],
  'test': [
