@@ -35,10 +35,9 @@ class AccountAnalyticLine(orm.Model):
     # TODO SUPPRIMER PAS UTILISÉ
     # format du default ????
     def _get_default_invoiced_hours(self, cr, uid, ids, context=None):
-        import pdb
-        pdb.set_trace()
+        import pdb; pdb.set_trace()
         res = {}
-        return
+        return res
 
     # OK
     def _get_default_invoiced_product(self, cr, uid, context=None):
@@ -120,8 +119,6 @@ class AccountAnalyticLine(orm.Model):
     # vérifier l' assignation sur les self du retour
     # TODO: pas utilisée pour le moment
     def _get_invoice_grouping_key(self, cr, uid, ids, context=None):
-        import pdb
-        pdb.set_trace()
         """ Get key for grouping in invoicing """
 
         product = (self.invoiced_product or
@@ -149,8 +146,6 @@ class AccountAnalyticLine(orm.Model):
     # TODO Renommer l'appel à mettre dans la vue
     # TODO page avec le onchange
     def onchange_to_invoice_set_invoiced_hours(self, cr, id, onchangeInvoice, context=None):
-        import pdb
-        pdb.set_trace()
         """ Change invoiced_hours according to invoicing rate factor """
         # TOTEST PDB
         if self.to_invoice:

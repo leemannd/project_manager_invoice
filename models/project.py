@@ -17,6 +17,7 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 from openerp.osv import orm, fields
+from openerp.tools.translate import _
 
 TASK_WATCHERS = [
     'work_ids',
@@ -39,16 +40,21 @@ class ProjectTask(orm.Model):
     #TOTEST
     def _progress_rate(self, cr, uid, ids, names, arg, context=None):
         """ OVERWRITE _progress_rate to make calculation with invoiced_hours
-        and not unit_amount"""
+        and not unit_amount & added calculation of new fields"""
         """TODO improve code taken for OpenERP"""  #Comment already there
+        import pdb; pdb.set_trace()
         res = {}
-        cr.execute("""SELECT task_id, COALESCE(SUM(invoiced_hours),0)
+        """ invoiced_hours in place of unit_amount """
+        cr.execute("""SELECT task_id, COALESCE(SUM(invoiced_hours),0) 
                         FROM account_analytic_line
                       WHERE task_id IN %s
                       GROUP BY task_id""", (tuple(ids),))
         hours = dict(cr.fetchall())
         for task in self.browse(cr, uid, ids, context=context):
             res[task.id] = {}
+            invoiced_hours = sum(l.invoiced_hours for l in task.work_ids)
+            res[task.id]['invoiced_hours'] = invoiced_hours
+            res[task.id]['remaining_hours'] = task.planned_hours - invoiced_hours
             res[task.id]['effective_hours'] = hours.get(task.id, 0.0)
             res[task.id]['total_hours'] = (
                 task.remaining_hours or 0.0) + hours.get(task.id, 0.0)
@@ -86,21 +92,21 @@ class ProjectTask(orm.Model):
         return res
 
     _store_hours = {'project.task': (lambda self, cr, uid, ids, c={}: ids,
-                                     ['work_ids', 'planned_hours'], 20),
+                                     TASK_WATCHERS, 20),
                     'account.analytic.line': (_get_analytic_line,
-                                              ['task_id', 'invoiced_hours'], 20)
+                                              TIMESHEET_WATCHERS, 20)
                     }
     _columns = {
         'invoiced_hours': fields.function(
-            _get_hours,
+            _progress_rate,
             type='float',
             store=_store_hours,
-            multi="hours"
+            multi="progress"
         ),
         'remaining_hours': fields.function(
-            _get_hours,
+            _progress_rate,
             type='float',
             store=_store_hours,
-            multi="hours"
+            multi="progress"
         ),
     }
