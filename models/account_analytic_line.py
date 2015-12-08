@@ -21,6 +21,7 @@ import time
 from openerp import SUPERUSER_ID
 from openerp.osv import orm, fields
 from openerp.tools.translate import _
+import cProfile
 
 #Pas d'interférences avec d'autres modules
 STATES = [
@@ -33,9 +34,7 @@ class AccountAnalyticLine(orm.Model):
     _inherit = 'account.analytic.line'  # ./parts/server/addons/analytic/analytic.py
 
     # TODO SUPPRIMER PAS UTILISÉ
-    # format du default ????
     def _get_default_invoiced_hours(self, cr, uid, ids, context=None):
-        import pdb; pdb.set_trace()
         res = {}
         return res
 
@@ -67,10 +66,55 @@ class AccountAnalyticLine(orm.Model):
         'invoiced_product_id': _get_default_invoiced_product,
     }
 
-    # TOTEST
+    #TODO not working
+    def _set_remaining_hours_create(self, cr, uid, vals, context=None):
+        if not vals.get('task_id'):
+            return
+        hours = vals.get('invoiced_hours', 0.0)
+        # We can not do a write else we will have a recursion error
+        cr.execute(
+            'UPDATE project_task '
+            'SET remaining_hours=remaining_hours - %s '
+            'WHERE id=%s', (hours, vals['task_id']))
+        self._trigger_projects(cr, uid, [vals['task_id']], context=context)
+        return vals
+
+    #TODO not working
+    def _set_remaining_hours_write(self, cr, uid, ids, vals, context=None):
+        if isinstance(ids, (int, long)):
+            ids = [ids]
+        for line in self.browse(cr, uid, ids):
+            # in OpenERP if we set a value to nil vals become False
+            old_task_id = line.task_id and line.task_id.id or None
+            # if no task_id in vals we assume it is equal to old
+            new_task_id = vals.get('task_id', old_task_id)
+            # we look if value has changed
+            if (new_task_id != old_task_id) and old_task_id:
+                self._set_remaining_hours_unlink(cr, uid, [line.id], context)
+                if new_task_id:
+                    data = {'task_id': new_task_id,
+                            'to_invoice': vals.get('to_invoice',
+                                                   line.to_invoice.id),
+                            'unit_amount': vals.get('unit_amount',
+                                                    line.unit_amount)}
+                    self._set_remaining_hours_create(cr, uid, data, context)
+                    self._trigger_projects(
+                        cr, uid, list(set([old_task_id, new_task_id])),
+                        context=context)
+                return ids
+            if new_task_id:
+                hours = vals.get('invoiced_hours', line.invoiced_hours)
+                old_hours = line.invoiced_hours if old_task_id else 0.0
+                # We can not do a write else we will have a recursion error
+                cr.execute(
+                    'UPDATE project_task '
+                    'SET remaining_hours=remaining_hours - %s + (%s) '
+                    'WHERE id=%s', (hours, old_hours, new_task_id))
+                self._trigger_projects(cr, uid, [new_task_id], context=context)
+        return ids
+
+    # # TOTEST
     def _check(self, cr, uid, ids, context=None):
-        import pdb
-        pdb.set_trace()
         """ OVERWRITE _check to check state of the line instead of the sheet
         """
         for line in self.browse(self, cr, uid, ids, context=context):
@@ -88,10 +132,11 @@ class AccountAnalyticLine(orm.Model):
     def create(self, cr, uid, vals, context=None):
         if not vals['invoiced_hours']:
             vals['invoiced_hours'] = vals['unit_amount']
+        self._set_remaining_hours_create(cr, uid, vals, context)
         res = super(AccountAnalyticLine, self).create(
-            cr, uid, vals, context=None)
+            cr, uid, vals, context=context)
 
-        return res
+        return orm.cr
 
     # OK
     def write(self, cr, uid, ids, vals, context=None):
@@ -111,9 +156,13 @@ class AccountAnalyticLine(orm.Model):
                         _(u"You dont have the rights to modify the following entries %s") % (
                             errors)
                     )
-
+        self._set_remaining_hours_write(cr, uid, ids, vals, context=context)
         return super(AccountAnalyticLine, self).write(
             cr, uid, ids, vals, context=context)
+
+    #TODO tester le fonctionnement actuel du unlink
+    # def unlink(self, cr,k uid, vals, context=None):
+
 
     # TODO verifier la fonction pour le test avec self sur l'assiniation de product
     # vérifier l' assignation sur les self du retour
@@ -135,13 +184,12 @@ class AccountAnalyticLine(orm.Model):
         user = self.pool.get('res.users')
         if(user.has_group(cr, uid, 'project.group_project_manager')):
             return self.write(cr, uid, ids, vals={
-                       'state': 'confirm'}, context=context)
+                'state': 'confirm'}, context=context)
 
     # OK
     def action_reset_to_draft(self, cr, uid, ids, context=None):
         return self.write(cr, uid, ids, vals={
-                   'state': 'draft'}, context=context)
-
+            'state': 'draft'}, context=context)
 
     # TODO Renommer l'appel à mettre dans la vue
     # TODO page avec le onchange
@@ -306,7 +354,8 @@ class AccountAnalyticLine(orm.Model):
                                     cr, uid, [line['product_uom_id']], context2)[0].name))
                             else:
                                 """ Modification de unit_price par 'invoiced_hours' """
-                                details.append("%s" % (line['invoiced_hours'], ))
+                                details.append("%s" %
+                                               (line['invoiced_hours'], ))
                         if data.get('name', False):
                             details.append(line['name'])
                         note.append(
